@@ -2,5 +2,4 @@ __pycache__/
 .vscode/
 deep_learning/.vscode/
 deep_learning/data/
-*/data
-*/data/
+machine_learning/hmm/data/
