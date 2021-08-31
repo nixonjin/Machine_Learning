@@ -49,15 +49,15 @@ def load_data_ml100k(data, num_users, num_items, feedback='explicit'):
     inter = np.zeros((num_items, num_users)) if feedback == 'explicit' else {}
     for line in data.itertuples():
         # user id, item_id are counted from 1
-        user_index, item_index = int(line[0]-1), int(line[1]-1)
-        users.append(user_index)
-        items.append(item_index)
+        user_idx, item_idx = int(line[0]-1), int(line[1]-1)
+        users.append(user_idx)
+        items.append(item_idx)
         score = int(line[3]) if feedback=='explicit' else 1
         scores.append(score)
         if feedback == 'implicit':
-            inter.setdefault(user_index, []).append(item_index)
+            inter.setdefault(user_idx, []).append(item_idx)
         else:
-            inter[item_index, user_index] = score
+            inter[item_idx, user_idx] = score
     return users, items, scores, inter
 
 class SeqDataset(Dataset):
@@ -75,19 +75,48 @@ class SeqDataset(Dataset):
         """
         user_ids, item_ids = torch.as_tensor(user_ids), torch.as_tensor(item_ids)
         sort_idx = sorted(range(len(user_ids)), key=lambda k: user_ids[k])
+        # sort zip(user_ids, item_ids) by the order of user_ids
         u_ids, i_ids = user_ids[sort_idx], item_ids[sort_idx]
+        self.all_items = set([i for i in range(num_items)])
+        self.candidates = candidates
         # temp is used to record how many items that a user owns
         temp = {}
         for i, u_id in enumerate(u_ids):
+            temp.setdefault(u_id, [])
+            temp[u_id].append(i_ids[i])
+        num_seq = 0
+        temp_seq_items = []
+        temp_seq_users = []
+        temp_seq_tgt = []
+        self.test_seq = torch.zeros((num_users, seq_len))
+        for user_id, item_seq in temp.items():
+            temp_len = len(item_seq)
+            if temp_len < len(item_seq):
+                print("seq_len maybe too large, some users do not have so much related items")
+                continue
+            else:
+                temp_num = temp_len - seq_len + 1
+                num_seq += temp_num
+                for i in range(temp_num):
+                    if i == temp_num - 1:
+                        self.test_seq[user_id][:] = item_seq[-seq_len:]
+                    else:
+                        temp_seq_users.append[user_id]
+                        temp_seq_items.append[list(item_seq[i:i+seq_len])]
+                        temp_seq_tgt.append[item_seq[i+seq_len]]
+        assert len(temp_seq_users) == num_seq
+        self.num_seq = num_seq
+        self.seq_users = torch.as_tensor(temp_seq_users)
+        self.seq_tgt = torch.as_tensor(temp_seq_tgt)
+        self.seq_items = torch.as_tensor(temp_seq_items)
 
-    
     def __len__(self):
-        pass
+        return self.num_seq
 
-    def __getitem__(self, index):
+    def __getitem__(self, idx):
         """
         parameter:
-            index
+            idx
         return:
             user_id, item sequence, target item, negative item
             
@@ -95,19 +124,38 @@ class SeqDataset(Dataset):
             (user_id, item sequence, negative item)作为输入, 模型会输出他们的相应概率值，最后
             使用BPR Loss（Bayesian Personalized Ranking Loss）来更新模型参数
         """
-
-        return super().__getitem__(index)
+        neg = list(self.all_items - self.candidates[self.seq_users[idx]])
+        i = random.randint(0,len(neg)-1)
+        return (self.seq_users(idx), self.seq_items[idx], self.seq_tgt[idx],neg[i])
         
+#%%
+TARGET_NUM, L, batch_size = 1, 5, 4096
+df, num_users, num_items = d2l.read_data_ml100k()
+train_data, test_data = d2l.split_data_ml100k(df, num_users, num_items,
+                                              'seq-aware')
+users_train, items_train, ratings_train, candidates = d2l.load_data_ml100k(
+    train_data, num_users, num_items, feedback="implicit")
+users_test, items_test, ratings_test, test_iter = d2l.load_data_ml100k(
+    test_data, num_users, num_items, feedback="implicit")
+train_seq_data = SeqDataset(users_train, items_train, L, num_users, num_items,
+                            candidates)
 #%%
 class Caser(nn.Module):
     def __init__(self, num_factors, num_users, num_items, L=5, d=16,
                  d_prime=4):
         self.P = nn.Embedding(num_users, num_factors)
         self.Q = nn.Embedding(num_items, num_factors)
+        self.conv_h = nn.Sequential()
+        self.max_pool = nn.Sequential()
+        for i in range(1,L+1):
+            self.conv_h.add(nn.Conv2d(1, d, (i,num_factors)))
+            self.max_pool.add()
 
 
     def forward(self,user_id,item_id,seq):
-        pass
+        # emb: (seq_len, num_factors)
+        emb = self.Q[seq]
+
 
 #%%
 num_users=10
